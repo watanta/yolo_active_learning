@@ -48,7 +48,7 @@ class ActiveLearning:
             raise ValueError(f"No images found in {train_images_dir}")
         
         # 検証用データを2000枚固定で選択
-        val_size = 2000
+        val_size = 600
         print(f"\nSelecting {val_size} images for validation...")
         val_images = set(random.sample(all_images, val_size))
         remaining_images = [img for img in all_images if img not in val_images]
@@ -165,12 +165,15 @@ class ActiveLearning:
                 
                 if len(result.boxes) > 0:
                     confidences = [box.conf.item() for box in result.boxes]
-                    avg_conf = np.mean(confidences)
+                    min_conf = min(confidences)  # 平均値から最小値に変更
                 else:
-                    avg_conf = 1.0  # 検出なしの場合は最高確信度とする
+                    min_conf = 1.0  # 検出なしの場合は最高確信度とする
                 
-                image_confidences.append((img_path, avg_conf))
-                pbar.set_postfix({'Images Processed': len(image_confidences)})
+                image_confidences.append((img_path, min_conf))
+                pbar.set_postfix({
+                    'Images Processed': len(image_confidences),
+                    'Current Min Conf': f'{min_conf:.4f}'
+                })
 
         # 確信度でソートし、最も低い上位num_samples個を選択
         selected_images = sorted(image_confidences, key=lambda x: x[1])[:num_samples]
@@ -180,24 +183,35 @@ class ActiveLearning:
         
         return [img_path for img_path, _ in selected_images]
 
-    def add_to_training(self, selected_images):
+    def add_to_training(self, selected_images, round_num):
         """選択したサンプルを訓練セットに追加"""
         if not selected_images:
             return 0
+
+        # ラウンドごとの保存ディレクトリを作成
+        round_dir = self.active_data_dir / f'round_{round_num}_selected'
+        round_dir.mkdir(parents=True, exist_ok=True)
 
         samples_added = 0
         with tqdm(selected_images, desc="Adding to training set", position=2) as pbar:
             for image_path in pbar:
                 label_path = self.pool_dir / 'labels' / (image_path.stem + '.txt')
                 
-                # 画像とラベルを訓練セットに移動
-                shutil.move(image_path, self.train_dir / 'images' / image_path.name)
+                # ラベルファイルが存在する場合のみ処理
                 if label_path.exists():
+                    # 選択された画像をround_dirにコピー
+                    shutil.copy2(image_path, round_dir / image_path.name)
+                    
+                    # 画像とラベルを訓練セットに移動
+                    shutil.move(image_path, self.train_dir / 'images' / image_path.name)
                     shutil.move(label_path, self.train_dir / 'labels' / label_path.name)
                     samples_added += 1
-                
-                pbar.set_postfix({'Added': samples_added})
-                
+                    
+                    pbar.set_postfix({'Added': samples_added})
+                else:
+                    print(f"Skipping {image_path.name} - no label file found")
+
+        print(f"\nSuccessfully added {samples_added} samples to training set")
         return samples_added
     
 def print_metrics(metrics, prefix=""):
@@ -242,13 +256,13 @@ def train_with_active_learning():
     
     with tqdm(total=max_rounds, desc="Overall Progress", position=0) as pbar_overall:
         print("\n1. Initializing Active Learning...")
-        active_learner = ActiveLearning(initial_samples=100)
+        active_learner = ActiveLearning(initial_samples=100, data_root='data/rock_paper_scissors')
         active_learner.prepare_initial_dataset()
         yaml_path = active_learner.create_yaml()
         
         # 学習設定
         config = {
-            'epochs': 3,
+            'epochs': 5,
             'batch': 2,
             'imgsz': 640,
             'device': 0,
@@ -256,11 +270,11 @@ def train_with_active_learning():
             'patience': 20,
             'save': True,
             'project': 'runs',
-            'name': 'active_learning',
+            'name': 'rock_paper_scissors',
         }
         
         print("\n2. Initializing YOLO model...")
-        model = YOLO('yolov8n.yaml')
+        model = YOLO('yolov8n.pt')
         
         # 初期状態の表示
         initial_train_size = len(list((active_learner.train_dir / 'images').glob('*.jpg')))
@@ -295,7 +309,11 @@ def train_with_active_learning():
             selected_samples = active_learner.select_next_sample(model, num_samples=samples_per_round)
             
             if selected_samples:
-                samples_added = active_learner.add_to_training(selected_samples)
+            # modelとround_numを追加
+                samples_added = active_learner.add_to_training(
+                    selected_samples,
+                    round_num + 1
+                )
                 print(f"\nAdded {samples_added} new samples to training set")
                 
                 # 新しいサンプルを追加した後で再学習
