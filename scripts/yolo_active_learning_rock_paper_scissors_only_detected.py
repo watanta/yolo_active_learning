@@ -148,22 +148,42 @@ class ActiveLearning:
         return yaml_path
 
     def select_next_sample(self, model, num_samples=100):
-        """プールからランダムにnum_samples個のサンプルを選択"""
+        """確信度が最も低い上位num_samples個のサンプルを選択"""
         pool_images = list((self.pool_dir / 'images').glob('*.jpg'))
-        print(f"Found {len(pool_images)} images in pool")
-        
         if not pool_images:
             return []
 
-        # 必要数と利用可能な画像数の小さい方を選択
-        num_to_select = min(num_samples, len(pool_images))
+        # 全画像の確信度を評価
+        image_confidences = []
+        with tqdm(pool_images, desc="Evaluating images", position=2) as pbar:
+            for img_path in pbar:
+                results = model.predict(
+                    str(img_path), 
+                    conf=0.1, 
+                    verbose=False,
+                    stream=True
+                )
+                result = next(results)
+                
+                if len(result.boxes) > 0:
+                    confidences = [box.conf.item() for box in result.boxes]
+                    min_conf = min(confidences)  # 平均値から最小値に変更
+                else:
+                    min_conf = 1.0  # 検出なしの場合は最高確信度とする
+                
+                image_confidences.append((img_path, min_conf))
+                pbar.set_postfix({
+                    'Images Processed': len(image_confidences),
+                    'Current Min Conf': f'{min_conf:.4f}'
+                })
+
+        # 確信度でソートし、最も低い上位num_samples個を選択
+        selected_images = sorted(image_confidences, key=lambda x: x[1])[:num_samples]
         
-        # ランダムに選択
-        selected_images = random.sample(pool_images, num_to_select)
+        print(f"\nSelected {len(selected_images)} images")
+        print(f"Confidence range: {selected_images[0][1]:.4f} - {selected_images[-1][1]:.4f}")
         
-        print(f"\nRandomly selected {len(selected_images)} images")
-        
-        return selected_images
+        return [img_path for img_path, _ in selected_images]
 
     def add_to_training(self, selected_images, model, round_num):
         """選択したサンプルを訓練セットに追加し、予測結果付きの画像を保存"""
@@ -260,12 +280,12 @@ def train_with_active_learning():
     
     # 全体の進捗バーを設定
     print("\n=== Active Learning Process ===")
-    max_rounds = 50
+    max_rounds = 25
     samples_per_round = 100  # 1ラウンドあたり100枚追加
     
     with tqdm(total=max_rounds, desc="Overall Progress", position=0) as pbar_overall:
         print("\n1. Initializing Active Learning...")
-        active_learner = ActiveLearning(initial_samples=100, data_root='data/rock_paper_scissors_random')
+        active_learner = ActiveLearning(initial_samples=100, data_root='data/rock_paper_scissors_only_detected')
         active_learner.prepare_initial_dataset()
         yaml_path = active_learner.create_yaml()
         
@@ -278,8 +298,8 @@ def train_with_active_learning():
             'workers': 8,
             'patience': 20,
             'save': True,
-            'project': 'rock_paper_scissors_random',
-            'name': 'rock_paper_scissors_random',
+            'project': 'rock_paper_scissors_only_detected',
+            'name': 'rock_paper_scissors_only_detected',
         }
         
         print("\n2. Initializing YOLO model...")

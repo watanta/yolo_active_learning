@@ -8,6 +8,8 @@ import os
 from tqdm.auto import tqdm
 import time
 
+random.seed(42)  # 任意の固定値（ここでは42）
+
 class ActiveLearning:
     def __init__(self, data_root='data/coco', initial_samples=100):
         # 絶対パスに変換

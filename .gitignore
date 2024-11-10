@@ -177,4 +177,5 @@ data/
 active_learning_data/
 runs/
 *.pt
+rock_paper_scissors*/
 # End of https://www.toptal.com/developers/gitignore/api/python
