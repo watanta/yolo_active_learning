@@ -183,8 +183,8 @@ class ActiveLearning:
         
         return [img_path for img_path, _ in selected_images]
 
-    def add_to_training(self, selected_images, round_num):
-        """選択したサンプルを訓練セットに追加"""
+    def add_to_training(self, selected_images, model, round_num):
+        """選択したサンプルを訓練セットに追加し、予測結果付きの画像を保存"""
         if not selected_images:
             return 0
 
@@ -199,15 +199,42 @@ class ActiveLearning:
                 
                 # ラベルファイルが存在する場合のみ処理
                 if label_path.exists():
-                    # 選択された画像をround_dirにコピー
-                    shutil.copy2(image_path, round_dir / image_path.name)
-                    
-                    # 画像とラベルを訓練セットに移動
-                    shutil.move(image_path, self.train_dir / 'images' / image_path.name)
-                    shutil.move(label_path, self.train_dir / 'labels' / label_path.name)
-                    samples_added += 1
-                    
-                    pbar.set_postfix({'Added': samples_added})
+                    try:
+                        # 予測を実行して結果を保存
+                        results = model.predict(
+                            str(image_path),
+                            conf=0.1,
+                            verbose=False,
+                            save=True,  # 予測結果を画像として保存
+                            project=str(round_dir),
+                            name='',
+                            exist_ok=True
+                        )
+                        
+                        # 予測の確信度情報を保存
+                        result = results[0]
+                        conf_info = []
+                        if len(result.boxes) > 0:
+                            for box in result.boxes:
+                                cls = result.names[int(box.cls)]
+                                conf = box.conf.item()
+                                conf_info.append(f"{cls}: {conf:.4f}")
+                        
+                        info_path = round_dir / f"{image_path.stem}_info.txt"
+                        with open(info_path, 'w') as f:
+                            f.write(f"Image: {image_path.name}\n")
+                            f.write(f"Confidence scores:\n")
+                            f.write("\n".join(conf_info) if conf_info else "No detections")
+                        
+                        # 画像とラベルを訓練セットに移動
+                        shutil.move(image_path, self.train_dir / 'images' / image_path.name)
+                        shutil.move(label_path, self.train_dir / 'labels' / label_path.name)
+                        samples_added += 1
+                        
+                        pbar.set_postfix({'Added': samples_added})
+                    except Exception as e:
+                        print(f"Error processing {image_path.name}: {e}")
+                        continue
                 else:
                     print(f"Skipping {image_path.name} - no label file found")
 
@@ -311,8 +338,9 @@ def train_with_active_learning():
             if selected_samples:
             # modelとround_numを追加
                 samples_added = active_learner.add_to_training(
-                    selected_samples,
-                    round_num + 1
+                    selected_images=selected_samples,
+                    model=model,  # modelを追加
+                    round_num=round_num + 1
                 )
                 print(f"\nAdded {samples_added} new samples to training set")
                 
