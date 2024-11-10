@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "yolo-active-learning"
+version = "0.1.0"
+description = ""
+authors = ["watanabe.takahiro <watanabe101watanabe@yahoo.co.jp>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+ultralytics = "^8.3.28"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
