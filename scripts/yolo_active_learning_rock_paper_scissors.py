@@ -167,7 +167,7 @@ class ActiveLearning:
                     confidences = [box.conf.item() for box in result.boxes]
                     min_conf = min(confidences)  # 平均値から最小値に変更
                 else:
-                    min_conf = 1.0  # 検出なしの場合は最高確信度とする
+                    min_conf = 0.0  # 検出なしの場合は最高確信度とする
                 
                 image_confidences.append((img_path, min_conf))
                 pbar.set_postfix({
@@ -278,7 +278,7 @@ def train_with_active_learning():
     
     # 全体の進捗バーを設定
     print("\n=== Active Learning Process ===")
-    max_rounds = 3
+    max_rounds = 25
     samples_per_round = 100  # 1ラウンドあたり100枚追加
     
     with tqdm(total=max_rounds, desc="Overall Progress", position=0) as pbar_overall:
